@@ -1,0 +1,24 @@
+# Nix
+flake.lock
+
+# Build outputs
+*.ll
+*.s
+*.o
+benchmark_no_sched
+benchmark_with_sched
+
+# Editor
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Typst output
+*.pdf
+
+# Backup files
+*.bak
