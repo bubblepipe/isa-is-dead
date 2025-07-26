@@ -3,51 +3,59 @@
 CXX := clang++
 CXXFLAGS := -std=c++17 -Wall -Wextra
 LLC := llc
-OPT := opt
+TRIPLE ?= arm64-apple-darwin
+MCPU ?=
 
-# Step 1: 编译到 LLVM IR (使用 O0 保留原始结构)
+# Step 1: 编译到 LLVM IR
 benchmark.ll: benchmark.cpp
-	$(CXX) $(CXXFLAGS) -O0 -S -emit-llvm -o $@ $<
-	@echo "Generated LLVM IR (unoptimized)"
+	$(CXX) $(CXXFLAGS) -O1 -S -emit-llvm -o $@ $<
+	@echo "Generated LLVM IR"
 
-# Step 2a: 生成禁用指令调度的汇编代码
+# Step 2a: 禁用调度 - 保持源代码顺序
 benchmark_no_sched.s: benchmark.ll
-	$(LLC) -O2 -mtriple=arm64-apple-darwin -disable-post-ra -disable-sched-cycles -o $@ $<
-	@echo "Generated assembly WITHOUT instruction scheduling"
+	$(LLC) -O2 -mtriple=$(TRIPLE) $(if $(MCPU),-mcpu=$(MCPU)) \
+		-pre-RA-sched=source \
+		-enable-post-misched=false \
+		-o $@ $<
+	@echo "Generated assembly WITHOUT scheduling for $(TRIPLE) $(MCPU)"
 
-# Step 2b: 生成启用指令调度的汇编代码（默认）
+# Step 2b: 启用调度优化
 benchmark_with_sched.s: benchmark.ll
-	$(LLC) -O2 -mtriple=arm64-apple-darwin -o $@ $<
-	@echo "Generated assembly WITH instruction scheduling"
+	$(LLC) -O2 -mtriple=$(TRIPLE) $(if $(MCPU),-mcpu=$(MCPU)) \
+		-pre-RA-sched=list-ilp \
+		-enable-post-misched=true \
+		-o $@ $<
+	@echo "Generated assembly WITH scheduling for $(TRIPLE) $(MCPU)"
 
 # Step 3: 组装和链接
 benchmark_no_sched: benchmark_no_sched.s
 	$(CXX) -o $@ $< -lbenchmark -lpthread
-	@echo "Built benchmark without instruction scheduling"
 
 benchmark_with_sched: benchmark_with_sched.s
 	$(CXX) -o $@ $< -lbenchmark -lpthread
-	@echo "Built benchmark with instruction scheduling"
 
-# 查看汇编差异
-diff_asm: benchmark_no_sched.s benchmark_with_sched.s
-	@echo "=== Assembly Difference (scheduling impact) ==="
-	@echo "Look for differences in instruction order within the main loop..."
-	@diff -u benchmark_no_sched.s benchmark_with_sched.s | grep -A5 -B5 "+" | head -50 || true
+# 比较 func 函数的汇编代码
+compare: benchmark_no_sched.s benchmark_with_sched.s
+	@echo "=== Comparing func function assembly ==="
+	@echo "--- No scheduling (source order) ---"
+	@sed -n '/__Z4funcPKj:/,/ret/p' benchmark_no_sched.s | head -40
+	@echo ""
+	@echo "--- With scheduling (optimized) ---"
+	@sed -n '/__Z4funcPKj:/,/ret/p' benchmark_with_sched.s | head -40
 
 # 运行性能测试
 run: benchmark_no_sched benchmark_with_sched
-	@echo "=== Performance Comparison ==="
+	@echo "=== Performance Comparison on $(TRIPLE) $(MCPU) ==="
 	@echo ""
 	@echo "1. WITHOUT instruction scheduling:"
-	./benchmark_no_sched --benchmark_min_time=2
+	./benchmark_no_sched --benchmark_min_time=2s
 	@echo ""
 	@echo "2. WITH instruction scheduling:"
-	./benchmark_with_sched --benchmark_min_time=2
+	./benchmark_with_sched --benchmark_min_time=2s
 
 all: benchmark_no_sched benchmark_with_sched
 
 clean:
 	rm -f *.ll *.s benchmark_no_sched benchmark_with_sched
 
-.PHONY: all clean diff_asm run
+.PHONY: all clean compare run
