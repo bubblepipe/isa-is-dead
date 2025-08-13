@@ -46,7 +46,7 @@
             echo "Usage:"
             echo "  make all         - Build benchmarks"
             echo "  make run         - Run performance comparison"
-            echo "  make analyze     - Compare assembly output"
+            echo "  make compare     - Compare assembly output"
             echo ""
             echo "Note: Using gcc for -fno-schedule-insns support"
           '';
